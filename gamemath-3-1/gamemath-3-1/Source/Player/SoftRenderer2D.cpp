@@ -69,6 +69,8 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	currentPosition += deltaPosition;
 }
 
+
+static int circleFullfill_Time = 0;
 // 렌더링 로직을 담당하는 함수
 void SoftRenderer::Render2D()
 {
@@ -80,25 +82,29 @@ void SoftRenderer::Render2D()
 	DrawGizmo2D();
 
 	// 렌더링 로직의 로컬 변수
+	const float radius = 50.f;
+	static std::vector<Vector2> circles;
+	if (circles.empty())
+	{
+		++circleFullfill_Time;
+		for (float x = -radius; x <= radius; ++x)
+		{
+			for (float y = -radius; y <= radius; ++y)
+			{
+				Vector2 pointToTest = Vector2(x, y);
+				float squaredLength = pointToTest.SizeSquared();
 
-	// 빨간색을 사용해 평행한 벡터를 표현
-	const float lineLength = 500.f;
-	Vector2 lineStart = currentPosition * lineLength;
-	Vector2 lineEnd = currentPosition * -lineLength;
-	r.DrawLine(lineStart, lineEnd, LinearColor::Red);
+				if (squaredLength <= radius * radius)
+					circles.push_back(Vector2(x, y));
+			}
+		}
+	}
 
-	const Vector2 rightBottomVect = Vector2(1.f, -1.f);
-	r.DrawPoint(currentPosition, LinearColor::Blue);
-	r.DrawPoint(currentPosition + Vector2::UnitX, LinearColor::Blue);
-	r.DrawPoint(currentPosition - Vector2::UnitX, LinearColor::Blue);
-	r.DrawPoint(currentPosition + Vector2::UnitY, LinearColor::Blue);
-	r.DrawPoint(currentPosition - Vector2::UnitY, LinearColor::Blue);
-	r.DrawPoint(currentPosition + Vector2::One, LinearColor::Blue);
-	r.DrawPoint(currentPosition - Vector2::One, LinearColor::Blue);
-	r.DrawPoint(currentPosition + rightBottomVect, LinearColor::Blue);
-	r.DrawPoint(currentPosition - rightBottomVect, LinearColor::Blue);
+	for (auto const& v : circles)
+		r.DrawPoint(v + currentPosition, LinearColor::Red);
 
-	r.PushStatisticText("Coordinates = " + currentPosition.ToString());
+    r.PushStatisticText("Cricle Played Time = " + std::to_string(circleFullfill_Time));
+	r.PushStatisticText("Coordinate : " + currentPosition.ToString());
 }
 
 // 메시를 그리는 함수
