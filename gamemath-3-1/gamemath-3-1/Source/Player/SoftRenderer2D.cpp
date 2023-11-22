@@ -55,6 +55,7 @@ void SoftRenderer::LoadScene2D()
 // 게임 로직과 렌더링 로직이 공유하는 변수
 Vector2 currentPosition;
 float currentScale = 10.f;
+float currentDegree = 0.f;
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -67,12 +68,16 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	static float scaleMin = 5.f;
 	static float scaleMax = 20.f;
 	static float scaleSpeed = 20.f;
+	static float rotateSpeed = 180.f;
 	
 	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
 	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
 	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
+	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
+
 	currentPosition += deltaPosition;
 	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
+	currentDegree += deltaDegree;
 }
 
 
@@ -90,7 +95,7 @@ void SoftRenderer::Render2D()
 	float rad = 0.f;
 	static float increment = 0.001f;
 	static std::vector<Vector2> hearts;
-
+	HSVColor hsv(0.f, 1.f, 0.85f);
 	if (hearts.empty())
 	{
 		for (rad = 0.f; rad < Math::TwoPI; rad += increment)
@@ -106,13 +111,24 @@ void SoftRenderer::Render2D()
 		}
 	}
 
+	float sin = 0.f, cos = 0.f;
+	Math::GetSinCos(sin, cos, currentDegree);
+
+	rad = 0.f;
 	for (auto const& v : hearts)
 	{
-		r.DrawPoint(v * currentScale + currentPosition, LinearColor::Blue);
+		Vector2 scaledV = v * currentScale;
+		Vector2 rotatedV = Vector2(scaledV.X * cos - scaledV.Y * sin, scaledV.X * sin + scaledV.Y * cos);
+		Vector2 translatedV = rotatedV + currentPosition;
+
+		hsv.H = rad / Math::TwoPI;
+		r.DrawPoint(translatedV, hsv.ToLinearColor());
+		rad += increment;
 	}
 
 	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
 	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
+	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
 }
 
 // 메시를 그리는 함수
