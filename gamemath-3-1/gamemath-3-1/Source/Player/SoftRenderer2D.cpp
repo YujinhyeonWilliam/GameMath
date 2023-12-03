@@ -52,10 +52,17 @@ void SoftRenderer::LoadScene2D()
 
 }
 
-// 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 currentPosition;
-float currentScale = 10.f;
-float currentDegree = 0.f;
+#pragma region Variables
+
+float fovAngle = 60.f;
+Vector2 playerPosition(0.f, 0.f);
+LinearColor playerColor = LinearColor::Gray;
+Vector2 targetPosition(0.f, 100.f);
+LinearColor targetColor = LinearColor::Blue;
+
+#pragma endregion 
+
+
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -64,20 +71,56 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	auto& g = Get2DGameEngine();
 	const InputManager& input = g.GetInputManager();
 
+	// 게임 로직 로컬 변수
 	static float moveSpeed = 100.f;
-	static float scaleMin = 5.f;
-	static float scaleMax = 20.f;
-	static float scaleSpeed = 20.f;
-	static float rotateSpeed = 180.f;
-	
+	static std::random_device rd;
+	static std::mt19937 mt(rd());
+	static std::uniform_real_distribution<float> randomPosX(-300.f, 300.f);
+	static std::uniform_real_distribution<float> randomPosY(-200.f, 200.f);
+
+	static float duration = 3.f;
+	static float elapsedTime = 0.f;
+	static Vector2 targetStart = targetPosition;
+	static Vector2 targetDestination = Vector2(randomPosX(mt), randomPosY(mt));
+
+	static float halfFovCos = cosf(Math::Deg2Rad(fovAngle * 0.5f));
+
+	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);
+
+	// 지정한 시간 경과시 새로운 이동 지점을 랜덤하게 설정
+	if (elapsedTime == duration)
+	{
+		targetStart = targetDestination;
+		targetPosition = targetDestination;
+		targetDestination = Vector2(randomPosX(mt), randomPosY(mt));
+		elapsedTime = 0.f;
+	}
+	else
+	{
+		float ratio = elapsedTime / duration;
+		targetPosition = Vector2(
+			Math::Lerp(targetStart.X, targetDestination.X, ratio),
+			Math::Lerp(targetStart.Y, targetDestination.Y, ratio)
+		);
+	}
+
 	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
 	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
-	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
-	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
+	Vector2 f = Vector2::UnitY;
+	Vector2 v = (targetPosition - playerPosition).GetNormalize();
+	
+	if (v.Dot(f) >= halfFovCos)
+	{
+		playerColor = LinearColor::Red;
+		targetColor = LinearColor::Red;
+	}
+	else
+	{
+		playerColor = LinearColor::Gray;
+		targetColor = LinearColor::Blue;
+	}
 
-	currentPosition += deltaPosition;
-	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
-	currentDegree += deltaDegree;
+	playerPosition += deltaPosition;
 }
 
 
@@ -88,47 +131,45 @@ void SoftRenderer::Render2D()
 	// 렌더링 로직에서 사용하는 모듈 내 주요 레퍼런스
 	auto& r = GetRenderer();
 	const auto& g = Get2DGameEngine();
-
-	// 배경에 격자 그리기
-	DrawGizmo2D();
 	
-	float rad = 0.f;
-	static float increment = 0.001f;
-	static std::vector<Vector2> hearts;
-	HSVColor hsv(0.f, 1.f, 0.85f);
-	if (hearts.empty())
+	// 렌더링 로직 로컬 변수
+	static float radius = 5.f;
+	static std::vector<Vector2> sphere;
+	static float sightLength = 300.f;
+
+	if (sphere.empty())
 	{
-		for (rad = 0.f; rad < Math::TwoPI; rad += increment)
+		for (float x = -radius; x <= radius; ++x)
 		{
-			float sin = sinf(rad);
-			float cos = cosf(rad);
-			float cos2 = cosf(2 * rad);
-			float cos3 = cosf(3 * rad);
-			float cos4 = cosf(4 * rad);
-			float x = 16.f * sin * sin * sin;
-			float y = (13 * cos) - (5 * cos2) - (2 * cos3) - cos4;
-			hearts.push_back(Vector2(x, y));
+			for (float y = -radius; y <= radius; ++y)
+			{
+				Vector2 target(x, y);
+				float sizeSquared = target.SizeSquared();
+				float rr = radius * radius;
+				if (sizeSquared < rr)
+				{
+					sphere.push_back(target);
+				}
+			}
 		}
 	}
 
-	float sin = 0.f, cos = 0.f;
-	Math::GetSinCos(sin, cos, currentDegree);
+	// 플레이어 렌더링
+	float halfFovSin = 0.f, halfFovCos = 0.f;
+	Math::GetSinCos(halfFovSin, halfFovCos, fovAngle * 0.5f);
 
-	rad = 0.f;
-	for (auto const& v : hearts)
-	{
-		Vector2 scaledV = v * currentScale;
-		Vector2 rotatedV = Vector2(scaledV.X * cos - scaledV.Y * sin, scaledV.X * sin + scaledV.Y * cos);
-		Vector2 translatedV = rotatedV + currentPosition;
+	r.DrawLine(playerPosition, playerPosition + Vector2(sightLength * halfFovSin, sightLength * halfFovCos), playerColor);
+	r.DrawLine(playerPosition, playerPosition + Vector2(-sightLength * halfFovSin, sightLength * halfFovCos), playerColor);
+	r.DrawLine(playerPosition, playerPosition + Vector2::UnitY * sightLength * 0.2f, playerColor);
 
-		hsv.H = rad / Math::TwoPI;
-		r.DrawPoint(translatedV, hsv.ToLinearColor());
-		rad += increment;
-	}
+	for (auto const& v : sphere)
+		r.DrawPoint(v + playerPosition, playerColor);
 
-	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
-	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
-	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
+	for (auto const& v : sphere)
+		r.DrawPoint(v + targetPosition, targetColor);
+
+	r.PushStatisticText(std::string("Player Position : ") + playerPosition.ToString());
+	r.PushStatisticText(std::string("Target Position : ") + targetPosition.ToString());
 }
 
 // 메시를 그리는 함수
