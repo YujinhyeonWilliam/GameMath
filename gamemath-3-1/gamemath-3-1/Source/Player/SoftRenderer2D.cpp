@@ -54,11 +54,9 @@ void SoftRenderer::LoadScene2D()
 
 #pragma region Variables
 
-float fovAngle = 60.f;
-Vector2 playerPosition(0.f, 0.f);
-LinearColor playerColor = LinearColor::Gray;
-Vector2 targetPosition(0.f, 100.f);
-LinearColor targetColor = LinearColor::Blue;
+Vector2 lightPosition;
+LinearColor lightColor;
+Vector2 circlePosition;
 
 #pragma endregion 
 
@@ -71,56 +69,28 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	auto& g = Get2DGameEngine();
 	const InputManager& input = g.GetInputManager();
 
-	// 게임 로직 로컬 변수
-	static float moveSpeed = 100.f;
-	static std::random_device rd;
-	static std::mt19937 mt(rd());
-	static std::uniform_real_distribution<float> randomPosX(-300.f, 300.f);
-	static std::uniform_real_distribution<float> randomPosY(-200.f, 200.f);
-
-	static float duration = 3.f;
+	static float duration = 20.f;
 	static float elapsedTime = 0.f;
-	static Vector2 targetStart = targetPosition;
-	static Vector2 targetDestination = Vector2(randomPosX(mt), randomPosY(mt));
+	static float currentDegree = 0.f;
+	static float lightDistance = 200.f;
+	static HSVColor lightHSVColor;
 
-	static float halfFovCos = cosf(Math::Deg2Rad(fovAngle * 0.5f));
 
-	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);
+	// 경과 시간에 따른 현재 각과 이를 사용한 [0, 1] 값의 생성
+	elapsedTime += InDeltaSeconds;
+	elapsedTime = Math::FMod(elapsedTime, duration);
+	float currentRad = (elapsedTime / duration) * Math::TwoPI;
+	float alpha = (sinf(currentRad) + 1) * 0.5f;
 
-	// 지정한 시간 경과시 새로운 이동 지점을 랜덤하게 설정
-	if (elapsedTime == duration)
-	{
-		targetStart = targetDestination;
-		targetPosition = targetDestination;
-		targetDestination = Vector2(randomPosX(mt), randomPosY(mt));
-		elapsedTime = 0.f;
-	}
-	else
-	{
-		float ratio = elapsedTime / duration;
-		targetPosition = Vector2(
-			Math::Lerp(targetStart.X, targetDestination.X, ratio),
-			Math::Lerp(targetStart.Y, targetDestination.Y, ratio)
-		);
-	}
+	// [0, 1]을 활용해 주기적으로 크기 반복하기
+	currentDegree = Math::Lerp(0.f, 360.f, alpha);
 
-	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
-	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
-	Vector2 f = Vector2::UnitY;
-	Vector2 v = (targetPosition - playerPosition).GetNormalize();
-	
-	if (v.Dot(f) >= halfFovCos)
-	{
-		playerColor = LinearColor::Red;
-		targetColor = LinearColor::Red;
-	}
-	else
-	{
-		playerColor = LinearColor::Gray;
-		targetColor = LinearColor::Blue;
-	}
-
-	playerPosition += deltaPosition;
+	// 광원의 좌표와 색상
+	float sin = 0.f, cos = 0.f;
+	Math::GetSinCosRad(sin, cos, currentRad);
+	lightPosition = Vector2(cos, sin) * lightDistance;
+	lightHSVColor.H = currentRad * Math::InvPI * 0.5f;
+	lightColor = lightHSVColor.ToLinearColor();
 }
 
 
@@ -133,43 +103,61 @@ void SoftRenderer::Render2D()
 	const auto& g = Get2DGameEngine();
 	
 	// 렌더링 로직 로컬 변수
-	static float radius = 5.f;
-	static std::vector<Vector2> sphere;
-	static float sightLength = 300.f;
+	static std::vector<Vector2> circle;
+	static float circleRadius = 50.f;
+	static std::vector<Vector2> light;
+	static float lightRadius = 10.f;
 
-	if (sphere.empty())
+	// 광원 표현 구체
+	if (light.empty())
 	{
-		for (float x = -radius; x <= radius; ++x)
+		for (float x = -lightRadius; x <= lightRadius; ++x)
 		{
-			for (float y = -radius; y <= radius; ++y)
+			for (float y = -lightRadius; y <= lightRadius; ++y)
 			{
 				Vector2 target(x, y);
 				float sizeSquared = target.SizeSquared();
-				float rr = radius * radius;
+				float rr = lightRadius * lightRadius;
 				if (sizeSquared < rr)
 				{
-					sphere.push_back(target);
+					light.push_back(target);
 				}
 			}
 		}
 	}
 
-	// 플레이어 렌더링
-	float halfFovSin = 0.f, halfFovCos = 0.f;
-	Math::GetSinCos(halfFovSin, halfFovCos, fovAngle * 0.5f);
+	// 빛을 받는 물체
+	if (circle.empty())
+	{
+		for (float x = -circleRadius; x <= circleRadius; ++x)
+		{
+			for (float y = -circleRadius; y <= circleRadius; ++y)
+			{
+				Vector2 target(x, y);
+				float sizeSquared = target.SizeSquared();
+				float rr = circleRadius * circleRadius;
+				if (sizeSquared < rr)
+				{
+					circle.push_back(target);
+				}
+			}
+		}
+	}
+	
+	static float lightLineLength = 50.f;
+	r.DrawLine(lightPosition, lightPosition - lightPosition.GetNormalize() * lightLineLength, lightColor);
 
-	r.DrawLine(playerPosition, playerPosition + Vector2(sightLength * halfFovSin, sightLength * halfFovCos), playerColor);
-	r.DrawLine(playerPosition, playerPosition + Vector2(-sightLength * halfFovSin, sightLength * halfFovCos), playerColor);
-	r.DrawLine(playerPosition, playerPosition + Vector2::UnitY * sightLength * 0.2f, playerColor);
+	for (auto const& v : light)
+		r.DrawPoint(v + lightPosition, lightColor);
 
-	for (auto const& v : sphere)
-		r.DrawPoint(v + playerPosition, playerColor);
+	for (auto const& v : circle)
+	{
+		Vector2 n = (v - circlePosition).GetNormalize();
+		Vector2 l = (lightPosition - v).GetNormalize();
+		float shading = Math::Clamp(n.Dot(l), 0.f, 1.f);
+		r.DrawPoint(v, lightColor * shading);
+	}
 
-	for (auto const& v : sphere)
-		r.DrawPoint(v + targetPosition, targetColor);
-
-	r.PushStatisticText(std::string("Player Position : ") + playerPosition.ToString());
-	r.PushStatisticText(std::string("Target Position : ") + targetPosition.ToString());
 }
 
 // 메시를 그리는 함수
