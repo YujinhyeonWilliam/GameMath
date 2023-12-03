@@ -54,10 +54,10 @@ void SoftRenderer::LoadScene2D()
 
 #pragma region Variables
 
-Vector2 lightPosition;
-LinearColor lightColor;
-Vector2 circlePosition;
-
+Vector2 point(0.f, 250.f);
+Vector2 lineStart(-400.f, 0.f);
+Vector2 lineEnd(400.f, 0.f);
+float currentDegree = 0.f;
 #pragma endregion 
 
 
@@ -68,29 +68,28 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	// 게임 로직에서 사용하는 모듈 내 주요 레퍼런스
 	auto& g = Get2DGameEngine();
 	const InputManager& input = g.GetInputManager();
-
-	static float duration = 20.f;
+	
+	static float duration = 6.f;
 	static float elapsedTime = 0.f;
-	static float currentDegree = 0.f;
-	static float lightDistance = 200.f;
-	static HSVColor lightHSVColor;
+	static float rotateSpeed = 180.f;
+	static float distance = 250.f;
+	static std::random_device rd;
+	static std::mt19937 mt(rd());
+	static std::uniform_real_distribution<float> randomY(-200.f, 200.f);
+	
+	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);
 
+	if (elapsedTime == duration)
+	{
+		lineStart = Vector2(-400.f, randomY(mt));
+		lineEnd = Vector2(400.f, randomY(mt));
+		elapsedTime = 0.f;
+	}
 
-	// 경과 시간에 따른 현재 각과 이를 사용한 [0, 1] 값의 생성
-	elapsedTime += InDeltaSeconds;
-	elapsedTime = Math::FMod(elapsedTime, duration);
-	float currentRad = (elapsedTime / duration) * Math::TwoPI;
-	float alpha = (sinf(currentRad) + 1) * 0.5f;
-
-	// [0, 1]을 활용해 주기적으로 크기 반복하기
-	currentDegree = Math::Lerp(0.f, 360.f, alpha);
-
-	// 광원의 좌표와 색상
+	currentDegree = Math::FMod(currentDegree + rotateSpeed * InDeltaSeconds, 360.f);
 	float sin = 0.f, cos = 0.f;
-	Math::GetSinCosRad(sin, cos, currentRad);
-	lightPosition = Vector2(cos, sin) * lightDistance;
-	lightHSVColor.H = currentRad * Math::InvPI * 0.5f;
-	lightColor = lightHSVColor.ToLinearColor();
+	Math::GetSinCos(sin, cos, currentDegree);
+	point = Vector2(cos, sin) * distance;
 }
 
 
@@ -104,29 +103,8 @@ void SoftRenderer::Render2D()
 	
 	// 렌더링 로직 로컬 변수
 	static std::vector<Vector2> circle;
-	static float circleRadius = 50.f;
-	static std::vector<Vector2> light;
-	static float lightRadius = 10.f;
+	static float circleRadius = 5.f;
 
-	// 광원 표현 구체
-	if (light.empty())
-	{
-		for (float x = -lightRadius; x <= lightRadius; ++x)
-		{
-			for (float y = -lightRadius; y <= lightRadius; ++y)
-			{
-				Vector2 target(x, y);
-				float sizeSquared = target.SizeSquared();
-				float rr = lightRadius * lightRadius;
-				if (sizeSquared < rr)
-				{
-					light.push_back(target);
-				}
-			}
-		}
-	}
-
-	// 빛을 받는 물체
 	if (circle.empty())
 	{
 		for (float x = -circleRadius; x <= circleRadius; ++x)
@@ -143,21 +121,27 @@ void SoftRenderer::Render2D()
 			}
 		}
 	}
-	
-	static float lightLineLength = 50.f;
-	r.DrawLine(lightPosition, lightPosition - lightPosition.GetNormalize() * lightLineLength, lightColor);
-
-	for (auto const& v : light)
-		r.DrawPoint(v + lightPosition, lightColor);
 
 	for (auto const& v : circle)
-	{
-		Vector2 n = (v - circlePosition).GetNormalize();
-		Vector2 l = (lightPosition - v).GetNormalize();
-		float shading = Math::Clamp(n.Dot(l), 0.f, 1.f);
-		r.DrawPoint(v, lightColor * shading);
-	}
+		r.DrawPoint(v + point, LinearColor::Red);
 
+	r.DrawLine(lineStart, lineEnd, LinearColor::Black);
+	r.DrawLine(lineStart, point, LinearColor::Red);
+
+	Vector2 unitV = (lineEnd - lineStart).GetNormalize();
+	Vector2 u = point - lineStart;
+	Vector2 projV = unitV * (u.Dot(unitV));
+	Vector2 projectedPoint = lineStart + projV;
+	float distance = (projectedPoint - point).Size();
+
+	for (auto const& v : circle)
+		r.DrawPoint(v + projectedPoint, LinearColor::Magenta);
+
+	// 투영 라인 그리기
+	r.DrawLine(projectedPoint, point, LinearColor::Gray);
+	r.PushStatisticText(std::string("Point : ") + point.ToString());
+	r.PushStatisticText(std::string("Projected Point : ") + projectedPoint.ToString());
+	r.PushStatisticText(std::string("Distance : ") + std::to_string(distance));
 }
 
 // 메시를 그리는 함수
