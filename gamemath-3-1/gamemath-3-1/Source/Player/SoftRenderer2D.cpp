@@ -54,10 +54,11 @@ void SoftRenderer::LoadScene2D()
 
 #pragma region Variables
 
-Vector2 point(0.f, 250.f);
-Vector2 lineStart(-400.f, 0.f);
-Vector2 lineEnd(400.f, 0.f);
+// 게임 로직과 렌더링 로직이 공유하는 변수
+Vector2 currentPosition;
+float currentScale = 100.f;
 float currentDegree = 0.f;
+
 #pragma endregion 
 
 
@@ -69,27 +70,22 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	auto& g = Get2DGameEngine();
 	const InputManager& input = g.GetInputManager();
 	
-	static float duration = 6.f;
-	static float elapsedTime = 0.f;
+	// 게임 로직의 로컬 변수
+	static float moveSpeed = 100.f;
+	static float scaleMin = 50.f;
+	static float scaleMax = 200.f;
+	static float scaleSpeed = 100.f;
 	static float rotateSpeed = 180.f;
-	static float distance = 250.f;
-	static std::random_device rd;
-	static std::mt19937 mt(rd());
-	static std::uniform_real_distribution<float> randomY(-200.f, 200.f);
-	
-	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);
 
-	if (elapsedTime == duration)
-	{
-		lineStart = Vector2(-400.f, randomY(mt));
-		lineEnd = Vector2(400.f, randomY(mt));
-		elapsedTime = 0.f;
-	}
+	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
+	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
+	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
+	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
 
-	currentDegree = Math::FMod(currentDegree + rotateSpeed * InDeltaSeconds, 360.f);
-	float sin = 0.f, cos = 0.f;
-	Math::GetSinCos(sin, cos, currentDegree);
-	point = Vector2(cos, sin) * distance;
+	// 물체의 최종 상태 설정
+	currentPosition += deltaPosition;
+	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
+	currentDegree += deltaDegree;
 }
 
 
@@ -101,47 +97,60 @@ void SoftRenderer::Render2D()
 	auto& r = GetRenderer();
 	const auto& g = Get2DGameEngine();
 	
-	// 렌더링 로직 로컬 변수
-	static std::vector<Vector2> circle;
-	static float circleRadius = 5.f;
+	DrawGizmo2D();
 
-	if (circle.empty())
+	static constexpr float squareHalfSize = 0.5f;
+	static constexpr size_t vertexCount = 4;
+	static constexpr size_t triangleCount = 2;
+	
+	static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
+		Vertex2D(Vector2(-squareHalfSize, -squareHalfSize)),
+		Vertex2D(Vector2(-squareHalfSize, squareHalfSize)),
+		Vertex2D(Vector2(squareHalfSize, squareHalfSize)),
+		Vertex2D(Vector2(squareHalfSize, -squareHalfSize)),
+	};
+	
+	static constexpr std::array<size_t, triangleCount * 3> indices = {
+		0, 1, 2,
+		0, 2, 3
+	};
+
+	Vector3 sBasis1(currentScale, 0.f, 0.f);
+	Vector3 sBasis2(0.f, currentScale, 0.f);
+	Vector3 sBasis3 = Vector3::UnitZ;
+	Matrix3x3 sMatrix(sBasis1, sBasis2, sBasis3);
+
+	float sin = 0.f, cos = 0.f;
+	Math::GetSinCos(sin, cos, currentDegree);
+	Vector3 rBasis1(cos, sin, 0.f);
+	Vector3 rBasis2(-sin, cos, 0.f);
+	Vector3 rBasis3 = Vector3::UnitZ;
+	Matrix3x3 rMatrix(rBasis1, rBasis2, rBasis3);
+
+	Vector3 tBasis1 = Vector3::UnitX;
+	Vector3 tBasis2 = Vector3::UnitY;
+	Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1.f);
+	Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
+
+	Matrix3x3 finalMatrix = tMatrix * rMatrix * sMatrix;
+
+	// 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
+	static std::vector<Vertex2D> vertices(vertexCount);
+
+	for (size_t vi = 0; vi < triangleCount; ++vi)
+		vertices[vi].Position = finalMatrix * rawVertices[vi].Position;
+
+	for (size_t ti = 0; ti < triangleCount; ++ti)
 	{
-		for (float x = -circleRadius; x <= circleRadius; ++x)
-		{
-			for (float y = -circleRadius; y <= circleRadius; ++y)
-			{
-				Vector2 target(x, y);
-				float sizeSquared = target.SizeSquared();
-				float rr = circleRadius * circleRadius;
-				if (sizeSquared < rr)
-				{
-					circle.push_back(target);
-				}
-			}
-		}
+		size_t bi = ti * 3;
+		r.DrawLine(vertices[indices[bi]].Position, vertices[indices[bi + 1]].Position, _WireframeColor);
+		r.DrawLine(vertices[indices[bi]].Position, vertices[indices[bi + 2]].Position, _WireframeColor);
+		r.DrawLine(vertices[indices[bi + 1]].Position, vertices[indices[bi + 2]].Position, _WireframeColor);
 	}
 
-	for (auto const& v : circle)
-		r.DrawPoint(v + point, LinearColor::Red);
-
-	r.DrawLine(lineStart, lineEnd, LinearColor::Black);
-	r.DrawLine(lineStart, point, LinearColor::Red);
-
-	Vector2 unitV = (lineEnd - lineStart).GetNormalize();
-	Vector2 u = point - lineStart;
-	Vector2 projV = unitV * (u.Dot(unitV));
-	Vector2 projectedPoint = lineStart + projV;
-	float distance = (projectedPoint - point).Size();
-
-	for (auto const& v : circle)
-		r.DrawPoint(v + projectedPoint, LinearColor::Magenta);
-
-	// 투영 라인 그리기
-	r.DrawLine(projectedPoint, point, LinearColor::Gray);
-	r.PushStatisticText(std::string("Point : ") + point.ToString());
-	r.PushStatisticText(std::string("Projected Point : ") + projectedPoint.ToString());
-	r.PushStatisticText(std::string("Distance : ") + std::to_string(distance));
+	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
+	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
+	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
 }
 
 // 메시를 그리는 함수
