@@ -143,6 +143,56 @@ void SoftRenderer::Render2D()
 	for (size_t ti = 0; ti < triangleCount; ++ti)
 	{
 		size_t bi = ti * 3;
+		std::array<Vertex2D, 3> tv = { vertices[indices[bi]], vertices[indices[bi + 1]], vertices[indices[bi + 2]] };
+		Vector2 minPos(Math::Min3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Min3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+		Vector2 maxPos(Math::Max3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Max3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+
+		// 무게중심좌표를 위한 준비작업
+		Vector2 u = tv[1].Position - tv[0].Position;
+		Vector2 v = tv[2].Position - tv[0].Position;
+
+		float udotv = u.Dot(v);
+		float vdotv = v.Dot(v);
+		float udotu = u.Dot(u);
+
+		// 분모
+		float denominator = udotv * udotv - vdotv * udotu;
+
+		if (denominator == 0.0f)
+			continue;
+
+		float invDenominator = 1.f / denominator;
+		ScreenPoint lowerLeftPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, minPos);
+		ScreenPoint upperRightPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, maxPos);
+
+		lowerLeftPoint.X = Math::Max(0, lowerLeftPoint.X);
+		lowerLeftPoint.Y = Math::Min(_ScreenSize.Y, lowerLeftPoint.Y);
+		upperRightPoint.X = Math::Min(_ScreenSize.X, upperRightPoint.X);
+		upperRightPoint.Y = Math::Max(0, upperRightPoint.Y);
+
+		for (int x = lowerLeftPoint.X; x <= upperRightPoint.X; x++)
+		{
+			for (int y = upperRightPoint.Y; y <= lowerLeftPoint.Y; ++y)
+			{
+				ScreenPoint fragment = ScreenPoint(x, y);
+				Vector2 pointToTest = fragment.ToCartesianCoordinate(_ScreenSize);
+				Vector2 w = pointToTest - tv[0].Position;
+				float wdotu = w.Dot(u);
+				float wdotv = w.Dot(v);
+
+				float s = (wdotv * udotv - wdotu * vdotv) * invDenominator;
+				float t = (wdotu * udotv - wdotv * udotu) * invDenominator;
+				float oneMinuST = 1.f - s - t;
+
+				
+				if (((s >= 0.f) && (s <= 1.f)) && ((t >= 0.f) && (t <= 1.f)) && ((oneMinuST >= 0.f) && (oneMinuST <= 1.f)))
+				{
+					r.DrawPoint(fragment, LinearColor::Blue);
+				}
+
+			}
+		}
+
 		r.DrawLine(vertices[indices[bi]].Position, vertices[indices[bi + 1]].Position, _WireframeColor);
 		r.DrawLine(vertices[indices[bi]].Position, vertices[indices[bi + 2]].Position, _WireframeColor);
 		r.DrawLine(vertices[indices[bi + 1]].Position, vertices[indices[bi + 2]].Position, _WireframeColor);
